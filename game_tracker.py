@@ -2,10 +2,42 @@ import requests
 from bs4 import BeautifulSoup
 import csv
 from datetime import date
-from google import genai
 import os
+import re
 
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+try:
+    from google import genai
+except ImportError:
+    genai = None
+
+def _parse_price_to_cents(price_text):
+    cleaned_text = price_text.replace(",", "")
+    match = re.search(r"(\d+(?:\.\d{1,2})?)", cleaned_text)
+    if not match:
+        return None
+    return int(round(float(match.group(1)) * 100))
+
+
+def _extract_price_cents(soup):
+    for selector in [
+        "div.game_purchase_price.price",
+        "div.game_purchase_price",
+        "[data-price-final]",
+    ]:
+        price_element = soup.select_one(selector)
+        if not price_element:
+            continue
+        if price_element.get("data-price-final"):
+            return int(price_element["data-price-final"])
+        parsed_price = _parse_price_to_cents(price_element.get_text(" ", strip=True))
+        if parsed_price is not None:
+            return parsed_price
+
+    meta_price = soup.select_one('meta[itemprop="price"]')
+    if meta_price and meta_price.get("content"):
+        return _parse_price_to_cents(meta_price["content"])
+
+    return None
 
 def get_game_price(url):
     try:
@@ -15,12 +47,13 @@ def get_game_price(url):
             "Accept": "text/html,application/xhtml+xml,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
         cookies = {"birthtime": "786239999", "mature_content": "1"}
-        response = requests.get(url, headers=headers, cookies=cookies)
+        response = requests.get(url, headers=headers, cookies=cookies, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
-        game_name = soup.title.text
-        price_div = soup.find("div", class_="game_purchase_price price")
-        price = int(price_div["data-price-final"])
+        game_name = soup.title.text if soup.title else url
+        price = _extract_price_cents(soup)
+        if price is None:
+            raise ValueError("Could not find a valid game price on the page")
         return game_name, price
     except Exception as e:
         print(f"Error fetching price: {e}")
@@ -56,6 +89,14 @@ def check_price_drop(game_name, current_price):
 
 def analyse_with_gemini(game_name, current_price, highest_price):
     try:
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            print("Skipping Gemini analysis: GEMINI_API_KEY not set")
+            return
+        if genai is None:
+            print("Skipping Gemini analysis: google-genai dependency is not installed")
+            return
+        client = genai.Client(api_key=api_key)
         drop_percentage = round((highest_price - current_price) / highest_price * 100)
         prompt = f"""
         A Steam game price drop has been detected.
@@ -78,14 +119,18 @@ def analyse_with_gemini(game_name, current_price, highest_price):
     except Exception as e:
         print(f"Error with Gemini analysis: {e}")
 
-# Track games
-games = [
-    "https://store.steampowered.com/app/3321460/Crimson_Desert/",
-    "https://store.steampowered.com/app/1174180/Red_Dead_Redemption_2/"
-]
+def main():
+    games = [
+        "https://store.steampowered.com/app/3321460/Crimson_Desert/",
+        "https://store.steampowered.com/app/1174180/Red_Dead_Redemption_2/"
+    ]
 
-for url in games:
-    game_name, price = get_game_price(url)
-    if game_name and price:
-        save_price(game_name, price)
-        check_price_drop(game_name, price)
+    for url in games:
+        game_name, price = get_game_price(url)
+        if game_name and price:
+            save_price(game_name, price)
+            check_price_drop(game_name, price)
+
+
+if __name__ == "__main__":
+    main()

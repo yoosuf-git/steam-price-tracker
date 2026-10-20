@@ -30,3 +30,13 @@ daily and provides intelligent buying recommendations using Google Gemini AI.
 ## Games Currently Tracked
 - Crimson Desert
 - Red Dead Redemption 2
+
+## Setup
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Set your Gemini API key:
+   ```bash
+   export GEMINI_API_KEY=your_api_key
+   ```
