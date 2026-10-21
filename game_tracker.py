@@ -10,6 +10,14 @@ try:
 except ImportError:
     genai = None
 
+
+def _extract_app_id(url):
+    match = re.search(r"/app/(\d+)", url)
+    if not match:
+        return None
+    return match.group(1)
+
+
 def _parse_price_to_cents(price_text):
     cleaned_text = price_text.replace(",", "")
     match = re.search(r"(\d+(?:\.\d{1,2})?)", cleaned_text)
@@ -51,31 +59,36 @@ def get_game_price(url):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         game_name = soup.title.text if soup.title else url
+        app_id = _extract_app_id(url)
         price = _extract_price_cents(soup)
         if price is None:
             raise ValueError("Could not find a valid game price on the page")
-        return game_name, price
+        return app_id, game_name, price
     except Exception as e:
         print(f"Error fetching price: {e}")
-        return None, None
+        return None, None, None
 
-def save_price(game_name, price):
+def save_price(app_id, game_name, price):
     try:
         today = date.today()
         with open("prices.csv", "a", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow([today, game_name, price])
+            writer.writerow([today, app_id, game_name, price])
     except Exception as e:
         print(f"Error saving price: {e}")
 
-def check_price_drop(game_name, current_price):
+def check_price_drop(app_id, game_name, current_price):
     try:
         prices = []
         with open("prices.csv", "r") as file:
             reader = csv.reader(file)
             for row in reader:
-                if row[1] == game_name:
-                    prices.append(int(row[2]))
+                if len(row) >= 4:
+                    if app_id and row[1] == app_id:
+                        prices.append(int(row[3]))
+                elif len(row) >= 3:
+                    if row[1] == game_name:
+                        prices.append(int(row[2]))
         if len(prices) == 0:
             print("No previous price found")
             return
@@ -126,10 +139,10 @@ def main():
     ]
 
     for url in games:
-        game_name, price = get_game_price(url)
+        app_id, game_name, price = get_game_price(url)
         if game_name and price:
-            save_price(game_name, price)
-            check_price_drop(game_name, price)
+            save_price(app_id, game_name, price)
+            check_price_drop(app_id, game_name, price)
 
 
 if __name__ == "__main__":

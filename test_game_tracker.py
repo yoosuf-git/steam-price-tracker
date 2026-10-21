@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import Mock, patch
+from io import StringIO
 
 import game_tracker
 
@@ -19,8 +20,9 @@ class GameTrackerTests(unittest.TestCase):
         mock_response.raise_for_status = Mock()
         mock_get.return_value = mock_response
 
-        name, price = game_tracker.get_game_price("https://example.com")
+        app_id, name, price = game_tracker.get_game_price("https://store.steampowered.com/app/123456/Test")
 
+        self.assertEqual(app_id, "123456")
         self.assertEqual(name, "Test Game")
         self.assertEqual(price, 4999)
 
@@ -39,10 +41,24 @@ class GameTrackerTests(unittest.TestCase):
         mock_response.raise_for_status = Mock()
         mock_get.return_value = mock_response
 
-        name, price = game_tracker.get_game_price("https://example.com")
+        app_id, name, price = game_tracker.get_game_price("https://store.steampowered.com/app/98765/Test")
 
+        self.assertEqual(app_id, "98765")
         self.assertEqual(name, "Meta Priced Game")
         self.assertEqual(price, 2999)
+
+    @patch("builtins.open")
+    @patch("game_tracker.analyse_with_gemini")
+    def test_check_price_drop_uses_app_id_history(self, mock_analyse, mock_open):
+        csv_data = (
+            "2026-10-01,111,Some Other Name,6999\n"
+            "2026-10-02,222,Tracked Name,1499\n"
+        )
+        mock_open.return_value.__enter__.return_value = StringIO(csv_data)
+
+        game_tracker.check_price_drop("111", "Tracked Name", 4999)
+
+        mock_analyse.assert_called_once_with("Tracked Name", 4999, 6999)
 
     @patch.dict("os.environ", {}, clear=True)
     @patch("builtins.print")
